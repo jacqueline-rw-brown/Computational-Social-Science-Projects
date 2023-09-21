@@ -1,0 +1,19 @@
+# Commands Run So Far
+
+# Cloning the repo
+* cd git
+* git clone 
+https://github.com/jacqueline-rw-brown/Computational-Social-Science-Projects.git
+* cd Computational-Social-Science-Projects
+
+# Making Project 1 folder and document with code 
+* mkdir "Project 1"
+* touch homework1.txt
+* nano homework1.txt
+
+# Commands I will run
+* git status
+* git add *
+* git commit -m "Updating Project1.txt with code"
+* git push
+
