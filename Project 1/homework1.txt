@@ -1,4 +1,4 @@
-# Commands Run So Far
+# Commands Run for Part 2
 
 # Cloning the repo
 * cd git
