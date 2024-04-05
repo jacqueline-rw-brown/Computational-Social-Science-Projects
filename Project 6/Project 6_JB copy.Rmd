@@ -1,0 +1,387 @@
+---
+title: 'Project 6: Randomization and Matching'
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+# Introduction
+
+In this project, you will explore the question of whether college education causally affects political participation. Specifically, you will use replication data from \href{https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1409483}{Who Matches? Propensity Scores and Bias in the Causal Eﬀects of Education on Participation} by former Berkeley PhD students John Henderson and Sara Chatfield. Their paper is itself a replication study of \href{https://www.jstor.org/stable/10.1017/s0022381608080651}{Reconsidering the Effects of Education on Political Participation} by Cindy Kam and Carl Palmer. In their original 2008 study, Kam and Palmer argue that college education has no effect on later political participation, and use the propensity score matching to show that pre-college political activity drives selection into college and later political participation. Henderson and Chatfield in their 2011 paper argue that the use of the propensity score matching in this context is inappropriate because of the bias that arises from small changes in the choice of variables used to model the propensity score. They use \href{http://sekhon.berkeley.edu/papers/GenMatch.pdf}{genetic matching} (at that point a new method), which uses an approach similar to optimal matching to optimize Mahalanobis distance weights. Even with genetic matching, they find that balance remains elusive however, thus leaving open the question of whether education causes political participation.
+
+You will use these data and debates to investigate the benefits and pitfalls associated with matching methods. Replication code for these papers is available online, but as you'll see, a lot has changed in the last decade or so of data science! Throughout the assignment, use tools we introduced in lab from the \href{https://www.tidyverse.org/}{tidyverse} and the \href{https://cran.r-project.org/web/packages/MatchIt/MatchIt.pdf}{MatchIt} packages. Specifically, try to use dplyr, tidyr, purrr, stringr, and ggplot instead of base R functions. While there are other matching software libraries available, MatchIt tends to be the most up to date and allows for consistent syntax.
+
+# Data
+
+The data is drawn from the \href{https://www.icpsr.umich.edu/web/ICPSR/studies/4023/datadocumentation#}{Youth-Parent Socialization Panel Study} which asked students and parents a variety of questions about their political participation. This survey was conducted in several waves. The first wave was in 1965 and established the baseline pre-treatment covariates. The treatment is whether the student attended college between 1965 and 1973 (the time when the next survey wave was administered). The outcome is an index that calculates the number of political activities the student engaged in after 1965. Specifically, the key variables in this study are:
+
+\begin{itemize}
+    \item \textbf{college}: Treatment of whether the student attended college or not. 1 if the student attended college between 1965 and 1973, 0 otherwise.
+    \item \textbf{ppnscal}: Outcome variable measuring the number of political activities the student participated in. Additive combination of whether the student voted in 1972 or 1980 (student\_vote), attended a campaign rally or meeting (student\_meeting), wore a campaign button (student\_button), donated money to a campaign (student\_money), communicated with an elected official (student\_communicate), attended a demonstration or protest (student\_demonstrate), was involved with a local community event (student\_community), or some other political participation (student\_other)
+\end{itemize}
+
+Otherwise, we also have covariates measured for survey responses to various questions about political attitudes. We have covariates measured for the students in the baseline year, covariates for their parents in the baseline year, and covariates from follow-up surveys. \textbf{Be careful here}. In general, post-treatment covariates will be clear from the name (i.e. student\_1973Married indicates whether the student was married in the 1973 survey). Be mindful that the baseline covariates were all measured in 1965, the treatment occurred between 1965 and 1973, and the outcomes are from 1973 and beyond. We will distribute the Appendix from Henderson and Chatfield that describes the covariates they used, but please reach out with any questions if you have questions about what a particular variable means.
+
+```{r}
+# Load tidyverse and MatchIt
+# Feel free to load other libraries as you wish
+library(tidyverse)
+library(MatchIt)
+library(purrr)
+#install.packages("tinytex")
+library("tinytex")
+
+# Load ypsps data
+ypsps <- read_csv('Computational-Social-Science-Training-Program/Projects/Project 6/data/ypsps.csv')
+head(ypsps)
+```
+
+# Randomization
+
+Matching is usually used in observational studies to to approximate random assignment to treatment. But could it be useful even in randomized studies? To explore the question do the following:
+
+\begin{enumerate}
+    \item Generate a vector that randomly assigns each unit to either treatment or control
+    \item Choose a baseline covariate (for either the student or parent). A binary covariate is probably best for this exercise.
+    \item Visualize the distribution of the covariate by treatment/control condition. Are treatment and control balanced on this covariate?
+    \item Simulate the first 3 steps 10,000 times and visualize the distribution of treatment/control balance across the simulations.
+\end{enumerate}
+
+```{r}
+# Set seed
+set.seed(42)
+
+# Generate a vector that randomly assigns each unit to treatment/control
+length(ypsps$interviewid)
+
+n <- 1254
+
+# generate vector
+sim <- data.frame(treat = (sample(c(0, 1), 
+                                 size = n, 
+                                 replace = TRUE)))
+
+# Choose a baseline covariate (use dplyr for this)
+sim$gender <- ypsps$student_Gen
+
+# Visualize the distribution by treatment/control (ggplot)
+
+sim %>%
+  ggplot(aes(x = gender, fill = treat)) + 
+  geom_histogram(binwidth = 1) +
+  facet_grid(cols = vars(treat)) 
+
+# Simulate this 10,000 times (monte carlo simulation - see R Refresher for a hint)
+
+simulate_diff <- function(data) {
+  data_sample <- data %>%
+    mutate(treat = sample(c(0, 1), n(), replace = TRUE)) %>% # Randomly reassign treatment/control
+    group_by(treat) %>%
+    summarise(mean_gender = mean(student_Gen, na.rm = TRUE)) %>%
+    ungroup()
+  
+  diff <- diff(data_sample$mean_gender)
+  return(diff)
+}
+
+set.seed(123) # Ensure reproducibility
+simulations <- replicate(10000, simulate_diff(ypsps), simplify = TRUE)
+
+# Visualize the distribution of the mean differences
+ggplot(data.frame(MeanDifferences = simulations), aes(x = MeanDifferences)) +
+  geom_histogram(binwidth = 0.01, fill = "green", color = "black") +
+  labs(title = "Distribution of Mean Differences in Gender",
+       x = "Mean Difference Between Treatment and Control",
+       y = "Frequency") +
+  theme_minimal()
+
+```
+
+## Questions
+\begin{enumerate}
+    \item \textbf{What do you see across your simulations? Why does independence of treatment assignment and baseline covariates not guarantee balance of treatment assignment and baseline covariates?}
+\end{enumerate}
+
+Your Answer: Across 10,000 simulations, we see that the mean difference in the baseline variable (student gender) between treatment and control groups follows a normal distrubution. This means that the independence assumption between treatment and voting is correct. However, we can see that in some of the simulations, there is an imbalance in the baseline variable between treatment and control. This is because independence between treatment and baseline characteristics does not guarantee balance of baseline characteristics between treatment groups. This could be due to a few circumstances: skew of baseline characteristics within the population (i.e. perhaps only 5% of students are women - the small number of women could be unequally allocated by random chance). Random assignment could still assign a smaller number of similar participants to the same group. However, as the sample size increases, the balance of baseline characteristics between treatment and control groups should improve. 
+
+# Propensity Score Matching
+
+## One Model
+Select covariates that you think best represent the "true" model predicting whether a student chooses to attend college, and estimate a propensity score model to calculate the Average Treatment Effect on the Treated (ATT). Plot the balance of the top 10 (or fewer if you select fewer covariates). Report the balance of the p-scores across both the treatment and control groups, and using a threshold of standardized mean difference of p-score $\leq .1$, report the number of covariates that meet that balance threshold.
+
+```{r, echo = FALSE}
+# Select covariates that represent the "true" model for selection, fit model
+#print(ls(ypsps))
+
+model <- glm(college ~ parent_EducHH + parent_HHInc + student_Govt4All + 
+               student_SchClub + student_GPA + student_SchOfficer + 
+               student_FPlans + student_LifeWish + parent_TrGovt + 
+               student_OccClub + student_Newspaper + student_Gen, 
+             family = binomial(link = "logit"), data = ypsps)
+
+# fit propensity scores
+ypsps$propensity_score <- predict(model, type = "response")
+
+summary(model)
+
+# Plot the balance for the top 10 covariates
+match_exact_att <- matchit(formula = college ~ parent_EducHH + parent_HHInc + 
+              + student_SchClub + student_GPA + student_SchOfficer + 
+               student_FPlans + parent_TrGovt + 
+               student_OccClub + student_Newspaper + student_Gen, data = ypsps, 
+               method = "exact", estimand = "ATT")
+summary(match_exact_att, un = FALSE)
+
+match_exact_att_data <- match.data(match_exact_att)
+
+
+lm_exact_att <- lm(student_ppnscal ~ college + parent_EducHH + parent_HHInc + 
+                     student_Govt4All + 
+               student_SchClub + student_GPA + student_SchOfficer + 
+               student_FPlans + student_LifeWish + parent_TrGovt + 
+               student_OccClub + student_Newspaper + student_Gen, 
+               data = match_exact_att_data, weights = weights)
+lm_exact_att_summ <- summary(lm_exact_att)
+lm_exact_att_summ
+
+ATT_exact <- lm_exact_att_summ$coefficients["college", "Estimate"]
+ATT_exact
+
+# Report the overall balance and the proportion of covariates that meet the 
+#balance threshold
+cobalt::bal.tab(college ~ parent_EducHH + parent_HHInc + 
+              student_Govt4All + student_SchClub + student_GPA + 
+                student_SchOfficer + 
+               student_FPlans + student_LifeWish + parent_TrGovt + 
+               student_OccClub + student_Newspaper + student_Gen, data = ypsps,
+              estimand = "ATT", m.threshold = .1)
+
+
+
+```
+
+## Simulations
+
+Henderson/Chatfield argue that an improperly specified propensity score model can actually \textit{increase} the bias of the estimate. To demonstrate this, they simulate 800,000 different propensity score models by choosing different permutations of covariates. To investigate their claim, do the following:
+
+\begin{itemize}
+    \item Using as many simulations as is feasible (at least 10,000 should be ok, more is better!), randomly select the number of and the choice of covariates for the propensity score model.
+    \item For each run, store the ATT, the proportion of covariates that meet the standardized mean difference $\leq .1$ threshold, and the mean percent improvement in the standardized mean difference. You may also wish to store the entire models in a list and extract the relevant attributes as necessary.
+    \item Plot all of the ATTs against all of the balanced covariate proportions. You may randomly sample or use other techniques like transparency if you run into overplotting problems. Alternatively, you may use plots other than scatterplots, so long as you explore the relationship between ATT and the proportion of covariates that meet the balance threshold.
+    \item Finally choose 10 random models and plot their covariate balance plots (you may want to use a library like \href{https://cran.r-project.org/web/packages/gridExtra/index.html}{gridExtra} to arrange these)
+\end{itemize}
+
+\textbf{Note: There are lots of post-treatment covariates in this dataset (about 50!)! You need to be careful not to include these in the pre-treatment balancing. Many of you are probably used to selecting or dropping columns manually, or positionally. However, you may not always have a convenient arrangement of columns, nor is it fun to type out 50 different column names. Instead see if you can use dplyr 1.0.0 functions to programatically drop post-treatment variables (\href{https://www.tidyverse.org/blog/2020/03/dplyr-1-0-0-select-rename-relocate/}{here} is a useful tutorial).}
+
+```{r, echo = FALSE}
+# Remove post-treatment covariates
+
+pretreat_cov <- ypsps %>%
+  dplyr::select(!contains("1973")) %>%
+  dplyr::select(!contains("1982")) %>%
+  dplyr::select(!contains("Placebo")) ##missing values
+
+# Randomly select features
+# Simulate random selection of features 10k+ times
+
+#length(ls(pretreat_cov)) #121 features, first 11 are related to outcome
+#pretreat_cov
+
+theme_set(theme_bw())
+
+theme_update(axis.title = element_text(size = 5), axis.text = element_text(size = 4),
+             legend.text = element_text(size = 4), legend.title = element_text(size = 4),
+             panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+sim_att <- setNames(data.frame(matrix(ncol = 2, nrow = 0)), c("att", "prop_pass"))
+i = 0
+myplots <- list() 
+
+for(i in 1:1000) {   
+  simulation <- pretreat_cov %>%
+    dplyr::select(12:121) %>%
+    sample(sample(1:109, 1), replace=FALSE) 
+  simulation <- cbind(pretreat_cov[1:12], simulation) 
+  simulation <- simulation[!duplicated(as.list(simulation))]
+  
+  # Fit p-score models and save ATTs, proportion of balanced covariates, and mean percent balance improvement
+  
+  model_sim <- glm(college ~ . -interviewid -student_vote -student_meeting -student_other -student_button -student_money -student_communicate -student_demonstrate -student_community -student_ppnscal , family = binomial(), data = simulation)
+  summary(model_sim)
+  simulation <- simulation %>% mutate(prop_score = predict(model_sim))
+  match_prop_att_sim <-  matchit(formula = college ~ . -interviewid -student_vote -student_meeting -student_other -student_button -student_money -student_communicate -student_demonstrate -student_community -student_ppnscal, data = simulation, method = "nearest", estimand = "ATT", ratio=1, replace=TRUE)
+  summary(match_prop_att_sim, un=FALSE)
+  
+  match_prop_att_data_sim <- match.data(match_prop_att_sim)
+  lm_prop_att_sim <- lm(student_ppnscal ~ . -interviewid -student_vote -student_meeting -student_other -student_button -student_money -student_communicate -student_demonstrate -student_community, data = match_prop_att_data_sim, weights = weights)
+  lm_prop_att_summ_sim <- summary(lm_prop_att_sim)
+  ATT_prop_sim <- lm_prop_att_summ_sim$coefficients["college", "Estimate"]
+  
+  balance_metrics <- cobalt::bal.tab(college ~ . -interviewid -student_vote -student_meeting -student_other -student_button -student_money -student_communicate -student_demonstrate -student_community -student_ppnscal, data = match_prop_att_data_sim, estimand = "ATT", m.threshold = .1)
+  
+  mean_proportion <- balance_metrics[["Balanced.mean.diffs"]][["count"]][1] / (balance_metrics[["Balanced.mean.diffs"]][["count"]][1] + balance_metrics[["Balanced.mean.diffs"]][["count"]][2])
+  
+  new_values <-  c(ATT_prop_sim, mean_proportion)
+  sim_att <- rbind(sim_att, new_values) 
+  
+  if (i<=10) {
+    p1 <- cobalt::love.plot(match_prop_att_sim, stats = c("mean.diffs"),
+          thresholds = c(m = .1, v = 2), abs = TRUE,
+          binary = "std", size=1,
+          var.order = "unadjusted") + theme(legend.position="none") +ggtitle("")
+    myplots[[i]] <- p1
+    i <- i + 1
+  }
+}
+
+colnames(sim_att)[1] ="att"
+colnames(sim_att)[2] ="prop_pass"
+
+# Plot ATT v. proportion
+ggplot(sim_att, aes(x=att, y=prop_pass)) + 
+  geom_point(alpha = 0.3) +
+  ylim(0,1) + 
+  ggtitle("ATT v. Proportion for Simulations") +
+  xlab("ATT") + ylab("Proportion Passing") 
+
+# 10 random covariate balance plots (hint try gridExtra)
+# Note: ggplot objects are finnicky so ask for help if you're struggling to automatically create them; consider using functions!
+
+pfull <- gridExtra::grid.arrange(grobs = myplots, nrow=2, heights=c(50, 50))
+gridExtra::marrangeGrob(grobs=myplots, nrow=1, ncol=5)
+
+```
+
+## Questions
+
+\begin{enumerate}
+    \item \textbf{How many simulations resulted in models with a higher proportion of balanced covariates? Do you have any concerns about this?}
+    Your Answer: Compared to my model, where only 2/12 covariates were balanced, essentially all the runs had a higher proportion of balance.
+    \item \textbf{Analyze the distribution of the ATTs. Do you have any concerns about this distribution?}
+    Your Answer: ATT ranged from ~0.6 to ~1.5, with the largest concentration between ~0.7 and ~1. Notably, as ATT increases the proportion of balanced covarariates becomes wider. There's a slight positive association between ATT and proportion of balanced covariates. 
+    \item \textbf{Do your 10 randomly chosen covariate balance plots produce similar numbers on the same covariates? Is it a concern if they do not?}
+    Your Answer: The mean differences for specific covariates are generally similar across balance plots. Given that the sample remains the same and the simulation is just changing the number of covariates included, it would be a concern if the balance changed across balance plots.
+    
+    NOTE: I was not able to run 10,000 simulations within a reasonable amount of time. I ended up running 1,000 simulations, so the results would likely be better if I had been able to run more sims. 
+\end{enumerate}
+
+# Matching Algorithm of Your Choice
+
+## Simulate Alternative Model
+
+Henderson/Chatfield propose using genetic matching to learn the best weights for Mahalanobis distance matching. Choose a matching algorithm other than the propensity score (you may use genetic matching if you wish, but it is also fine to use the greedy or optimal algorithms we covered in lab instead). Repeat the same steps as specified in Section 4.2 and answer the following questions:
+
+```{r, echo = FALSE}
+# Remove post-treatment covariates
+
+pretreat_cov <- ypsps %>%
+  dplyr::select(!contains("1973")) %>%
+  dplyr::select(!contains("1982")) %>%
+  dplyr::select(!contains("Placebo")) ##missing values
+
+# Randomly select features
+# Simulate random selection of features 10k+ times
+
+#length(ls(pretreat_cov)) #121 features, first 11 are related to outcome
+#pretreat_cov
+
+theme_set(theme_bw())
+
+theme_update(axis.title = element_text(size = 5), axis.text = element_text(size = 4),
+             legend.text = element_text(size = 4), legend.title = element_text(size = 4),
+             panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+sim_att2 <- setNames(data.frame(matrix(ncol = 2, nrow = 0)), c("att", "prop_pass"))
+i = 0
+myplots2 <- list() 
+
+for(i in 1:1000) {   
+  simulation <- pretreat_cov %>%
+    dplyr::select(12:121) %>%
+    sample(sample(1:109, 1), replace=FALSE) 
+  simulation <- cbind(pretreat_cov[1:12], simulation) 
+  simulation <- simulation[!duplicated(as.list(simulation))]
+  
+  # Fit p-score models and save ATTs, proportion of balanced covariates, and mean percent balance improvement
+  
+  model_sim <- glm(college ~ . -interviewid -student_vote -student_meeting -student_other -student_button -student_money -student_communicate -student_demonstrate -student_community -student_ppnscal , family = binomial(), data = simulation)
+  summary(model_sim)
+  simulation <- simulation %>% mutate(prop_score = predict(model_sim))
+  match_prop_att_sim <-  matchit(formula = college ~ . -interviewid -student_vote -student_meeting -student_other -student_button -student_money -student_communicate -student_demonstrate -student_community -student_ppnscal, data = simulation, method = "optimal", estimand = "ATT", ratio=1)
+  summary(match_prop_att_sim, un=FALSE)
+  
+  match_prop_att_data_sim <- match.data(match_prop_att_sim)
+  lm_prop_att_sim <- lm(student_ppnscal ~ . -interviewid -student_vote -student_meeting -student_other -student_button -student_money -student_communicate -student_demonstrate -student_community, data = match_prop_att_data_sim, weights = weights)
+  lm_prop_att_summ_sim <- summary(lm_prop_att_sim)
+  ATT_prop_sim <- lm_prop_att_summ_sim$coefficients["college", "Estimate"]
+  
+  balance_metrics <- cobalt::bal.tab(college ~ . -interviewid -student_vote -student_meeting -student_other -student_button -student_money -student_communicate -student_demonstrate -student_community -student_ppnscal, data = match_prop_att_data_sim, estimand = "ATT", m.threshold = .1)
+  
+  mean_proportion <- balance_metrics[["Balanced.mean.diffs"]][["count"]][1] / (balance_metrics[["Balanced.mean.diffs"]][["count"]][1] + balance_metrics[["Balanced.mean.diffs"]][["count"]][2])
+  
+  new_values <-  c(ATT_prop_sim, mean_proportion)
+  sim_att2 <- rbind(sim_att2, new_values) 
+  
+  if (i<=10) {
+    p1 <- cobalt::love.plot(match_prop_att_sim, stats = c("mean.diffs"),
+          thresholds = c(m = .1, v = 2), abs = TRUE,
+          binary = "std", size=1,
+          var.order = "unadjusted") + theme(legend.position="none") +ggtitle("")
+    myplots2[[i]] <- p1
+    i <- i + 1
+  }
+}
+
+colnames(sim_att2)[1] ="att"
+colnames(sim_att2)[2] ="prop_pass"
+
+# Plot ATT v. proportion
+ggplot(sim_att2, aes(x=att, y=prop_pass)) + 
+  geom_point(alpha = 0.3) +
+  ylim(0,1) + 
+  ggtitle("ATT v. Proportion for Simulations") +
+  xlab("ATT") + ylab("Proportion Passing") 
+
+# 10 random covariate balance plots (hint try gridExtra)
+# Note: ggplot objects are finnicky so ask for help if you're struggling to automatically create them; consider using functions!
+
+pfull <- gridExtra::grid.arrange(grobs = myplots2, nrow=2, heights=c(50, 50))
+gridExtra::marrangeGrob(grobs=myplots2, nrow=1, ncol=5)
+
+
+
+```
+
+```{r}
+# Visualization for distributions of percent improvement
+ hgA <- hist(sim_att$prop_pass, plot = FALSE) # Save first histogram data
+ hgB <- hist(sim_att2$prop_pass, plot = FALSE) # Save 2nd histogram data
+
+ plot(hgA, col = 'red') # Plot 1st histogram using a transparent color
+ plot(hgB, col = 'blue', add = TRUE) # Add 2nd histogram using different color
+```
+
+
+## Questions
+
+\begin{enumerate}
+    \item \textbf{Does your alternative matching method have more runs with higher proportions of balanced covariates?}
+     Your Answer: Yes - the optimal matching method has a much higher proportion of balanced covariates - between 90-100 percent. 
+    \item \textbf{Use a visualization to examine the change in the distribution of the percent improvement in balance in propensity score matching vs. the distribution of the percent improvement in balance in your new method. Which did better? Analyze the results in 1-2 sentences.}
+    Your Answer: We see that the proportion of balanced covariates in the optimal matching model is much higher than propensity score matching. The optimal matching model performs about twice as well as propensity score matching, suggesting that propensity score matching is not a good fit for the data. 
+    
+     NOTE: I was not able to run 10,000 simulations within a reasonable amount of time. I ended up running 1,000 simulations, so the results would likely be better if I had been able to run more sims. 
+\end{enumerate}
+
+\textbf{Optional:} Looking ahead to the discussion questions, you may choose to model the propensity score using an algorithm other than logistic regression and perform these simulations again, if you wish to explore the second discussion question further.
+
+# Discussion Questions
+
+\begin{enumerate}
+    \item \textbf{Why might it be a good idea to do matching even if we have a randomized or as-if-random design?}
+    Your Answer: Within-group heterogeneity would be a good reason to use matching. If the outcomes of interest may differ across specific sub-populations, or there's an interest in exploring the ATT for a subgroup, matching would help isolate the treatment effect. Further, regardless of the outcome of interest, randomization does not ensure balance between treatment and control groups. Matching can help alleviate differences in the makeup of treatment/control groups that could be related to the outcome of interest. 
+    \item \textbf{The standard way of estimating the propensity score is using a logistic regression to estimate probability of treatment. Given what we know about the curse of dimensionality, do you think there might be advantages to using other machine learning algorithms (decision trees, bagging/boosting forests, ensembles, etc.) to estimate propensity scores instead?}
+    Your Answer: Assuming that computational resources are not a problem, it makes sense that ML methods could improve propensity score matching. However, we saw last semester that sometimes logistic regression did not perform meaningfully better than ML methods. While there is a risk of overfitting with logistic regression, there are ML models that suffer the same issues. However, BART, lasso, or ridge regression could be good fits as they minimize covariates that don't meaningfully contribute to the outcome of interest. 
+\end{enumerate}
+
